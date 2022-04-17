@@ -18,11 +18,8 @@ def build_model(input_shape=None, load_prev_model=False):
             return None
     else:
         model = tf.keras.Sequential()
-        # model.add(tf.keras.layers.Dense(64, activation='relu', input_shape=input_shape))
-        # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False, dropout=0.2, forget_bias_initializer='one'))
-        model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=True, dropout=0.2))
-        # model.add(tf.keras.layers.GRU(units=32, input_shape=input_shape, return_sequences=False))
-        model.add(tf.keras.layers.BatchNormalization())
+        model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
+        #model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=False))
         model.add(tf.keras.layers.Dense(units=1))
         model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
@@ -49,16 +46,16 @@ class WindowGenerator:
 
         self.columns_indices = {col: i for i, col in enumerate(self.train_df.columns)}
 
-        self.scale_y = StandardScaler()  # scale for y
-        self.scale = StandardScaler()
+
 
     def getInputShape(self):
         return self.n_input, self.n_features
 
     def normalize(self, data):
-        self.scale.fit(self.train_df)
-        scaled_features = self.scale.transform(data.values)
-        return pd.DataFrame(scaled_features, index=data.index, columns=data.columns)
+        scaler = StandardScaler().fit(self.train_df.values)
+
+        scaled_features = scaler.transform(data.values)
+        return scaled_features #pd.DataFrame(scaled_features, index=data.index, columns=data.columns)
 
     def make_dataset(self, data, batch_size=None):
         if batch_size is None:
@@ -75,7 +72,7 @@ class WindowGenerator:
         if start_positions is None:
             start_positions = [0]
 
-        for start_pos in start_positions: # for each given prediction position
+        for start_pos in start_positions:  # for each given prediction position
             # normalize and split into features and labels
             data = self.make_dataset(data_raw[start_pos:], batch_size=self.num_predictions)
 
@@ -116,41 +113,19 @@ class WindowGenerator:
             else:
                 plt.show()
 
-    def testing(self, data):
-        start_pos = 5
-
-        first_data = list(data.take(1))[0]  # one batch
-
-        sequences = first_data[0].numpy()
-        targets = first_data[1].numpy()
-
-        data = self.make_dataset(self.test_df[start_pos:], batch_size=self.num_predictions)
-        first_data = list(data.take(1))[0]
-        batch_targets = first_data[1].numpy()
-
-        targets = self.test_df[self.target_col][
-                  self.n_input + start_pos: self.n_input + start_pos + self.num_predictions]
-
-        plt.plot(np.array(batch_targets), label="batch_targets")
-        plt.show()
-        plt.plot(targets, label="targets")
-        plt.show()
-
     def split_window(self, dataObj):
 
-        samples = dataObj[:, slice(0, self.n_input),
-                  slice(0, self.columns_indices[self.target_col])]  # selects sequence length and the relevant features
+        samples = dataObj[:, slice(0, self.n_input), slice(0, self.columns_indices[self.target_col])]  # selects sequence length and the relevant features
         labels = dataObj[:, slice(self.n_input, None), :]  # from the end of the sequence, select the target
         labels = labels[:, :, self.columns_indices[self.target_col]]  # select only the y value
 
         samples.set_shape([None, self.n_input, None])  # reshape to [batch_size, sequence_length, features]
         labels.set_shape([None, self.n_output])  # reshape to [batch_size, feature]
 
-        #print(samples.shape, labels.shape)
+        # print(samples.shape, labels.shape)
         return samples, labels
 
     def getTrainData(self):
-        self.scale_y.fit(self.train_df[self.target_col].values.reshape(-1, 1))
         return self.make_dataset(self.train_df)
 
     def getTestData(self):
@@ -165,7 +140,7 @@ def add_time_features(df):
     df['start_time'] = pd.to_datetime(df['start_time'])
     df['Minute sine'] = np.sin(2 * np.pi * df['start_time'].dt.minute / 60)
     df['Minute cosine'] = np.cos(2 * np.pi * df['start_time'].dt.minute / 60)
-    df['Hour sine'] = np.sin(2 * np.pi * df['start_time'].dt.hour / (24))
+    df['Hour sine'] = np.sin(2 * np.pi * df['start_time'].dt.hour / 24)
     df['Hour cosine'] = np.cos(2 * np.pi * df['start_time'].dt.hour / 24)
     df['Day sine'] = np.sin(2 * np.pi * df['start_time'].dt.day / 365.2524)
     df['Day cosine'] = np.cos(2 * np.pi * df['start_time'].dt.day / 365.2524)
@@ -179,7 +154,6 @@ def add_time_features(df):
 
 
 def add_lag_features(df, lag):
-    # df['flow_lag_'+str(lag)] = df['flow'].shift(lag)
     df['prev_y_' + str(lag)] = df['y'].shift(lag)
     df.dropna(inplace=True)
     return df
@@ -194,7 +168,11 @@ def clean_data(df_train, df_test):
 
 def fit_and_plot(model, train_data, test_data, epochs):
     history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data))
+
     plt.plot(history.history['loss'], label='train')
+    if history.history['val_loss'][-1] / 10 > history.history['loss'][-1]:  # if the losses differ alot, make two plots
+        plt.legend()
+        plt.show()
     plt.plot(history.history['val_loss'], label='test')
     plt.legend()
     plt.show()
