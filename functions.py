@@ -7,14 +7,24 @@ from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 
 
-def build_model(input_shape):
-    model = tf.keras.Sequential()
-    #model.add(tf.keras.layers.Dense(64, activation='relu', input_shape=input_shape))
-    #model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False, dropout=0.2, forget_bias_initializer='one'))
-    model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=True, dropout=0.2))
-    #model.add(tf.keras.layers.GRU(units=32, input_shape=input_shape, return_sequences=False))
-    model.add(tf.keras.layers.Dense(units=1))
-    model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
+def build_model(input_shape=None, load_prev_model=False):
+    if isinstance(load_prev_model, str):
+        try:
+            model = tf.keras.models.load_model(load_prev_model)
+            print('Loaded model from file: ' + load_prev_model)
+
+        except:
+            print('Error loading model')
+            return None
+    else:
+        model = tf.keras.Sequential()
+        # model.add(tf.keras.layers.Dense(64, activation='relu', input_shape=input_shape))
+        # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False, dropout=0.2, forget_bias_initializer='one'))
+        model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=True, dropout=0.2))
+        # model.add(tf.keras.layers.GRU(units=32, input_shape=input_shape, return_sequences=False))
+        model.add(tf.keras.layers.BatchNormalization())
+        model.add(tf.keras.layers.Dense(units=1))
+        model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
 
 
@@ -61,48 +71,50 @@ class WindowGenerator:
 
         return batchIterator.map(self.split_window)  # splits into features and labels
 
-    def predict_and_plot(self, model, data_raw, start_pos=0):
+    def predict_and_plot(self, model, data_raw, start_positions=None, save_plot=False):
+        if start_positions is None:
+            start_positions = [0]
 
-        data = self.make_dataset(data_raw[start_pos:], batch_size=self.num_predictions)
-        #targets = data_raw[self.target_col][
-        #          self.n_input + start_pos: self.n_input + start_pos + self.num_predictions].values
+        for start_pos in start_positions: # for each given prediction position
+            # normalize and split into features and labels
+            data = self.make_dataset(data_raw[start_pos:], batch_size=self.num_predictions)
 
-        predictions = []
-        first_data = list(data.take(1))[0]  # first batch, but one batch is the whole forcasting window
-        sequences = first_data[0].numpy()  # the input data
-        scaled_targets = first_data[1].numpy().flatten()
+            predictions = []
+            first_data = list(data.take(1))[0]  # first batch, but one batch is the whole forcasting window
+            sequences = first_data[0].numpy()  # the input data
+            scaled_targets = first_data[1].numpy().flatten()
 
-
-        history_targets = np.array(sequences[0][-self.n_input//2:, -1]).flatten() # history of prev_y's
-
-        # first prediction
-        sequence = tf.expand_dims(sequences[0], axis=0)
-        prediction = model.predict(sequence)[0][0]
-        predictions.append(prediction)
-
-        for sequence in tqdm(sequences[1:]):
-            # switch out the real y_prev with the predicted y
-            sequence[-1, -1] = prediction
-            sequence = tf.expand_dims(sequence, axis=0)
+            # first prediction
+            sequence = tf.expand_dims(sequences[0], axis=0)
             prediction = model.predict(sequence)[0][0]
             predictions.append(prediction)
 
-        predictions = np.array(predictions).flatten()
+            for sequence in tqdm(sequences[1:]):
+                # switch out the real y_prev with the predicted y
+                sequence[-1, -1] = prediction
+                sequence = tf.expand_dims(sequence, axis=0)
+                prediction = model.predict(sequence)[0][0]
+                predictions.append(prediction)
 
-        predictions = np.concatenate(([history_targets[-1]], predictions))
-        scaled_targets = np.concatenate(([history_targets[-1]], scaled_targets))
+            predictions = np.array(predictions).flatten()
 
+            history_targets = np.array(sequences[0][-self.n_input // 2:, -1]).flatten()  # history of prev_y's
+            predictions = np.concatenate(([history_targets[-1]], predictions))
+            scaled_targets = np.concatenate(([history_targets[-1]], scaled_targets))
 
-        len_history = len(history_targets)
-        x = range(len_history + self.num_predictions)
-        plt.figure(figsize=(12, 6))
-        plt.plot(x[:len_history], history_targets, label="history")
-        plt.plot(x[len_history-1:], scaled_targets, label="targets")
-        plt.plot(x[len_history-1:], predictions, label="predictions")
-        #plt.plot(targets, label="targets")
-        plt.legend()
-        plt.show()
-
+            len_history = len(history_targets)
+            x = range(len_history + self.num_predictions)
+            plt.figure(figsize=(12, 6))
+            plt.plot(x[:len_history], history_targets, label="history")
+            plt.plot(x[len_history - 1:], scaled_targets, label="targets")
+            plt.plot(x[len_history - 1:], predictions, label="predictions")
+            # plt.plot(targets, label="targets")
+            plt.legend()
+            if save_plot:
+                plt.savefig("prediction_plots/predictions_startpos=" + str(start_pos) + ".png")
+                plt.close()
+            else:
+                plt.show()
 
     def testing(self, data):
         start_pos = 5
@@ -134,7 +146,7 @@ class WindowGenerator:
         samples.set_shape([None, self.n_input, None])  # reshape to [batch_size, sequence_length, features]
         labels.set_shape([None, self.n_output])  # reshape to [batch_size, feature]
 
-        print(samples.shape, labels.shape)
+        #print(samples.shape, labels.shape)
         return samples, labels
 
     def getTrainData(self):
@@ -178,3 +190,12 @@ def clean_data(df_train, df_test):
     df_train_max = df_train.y.max()
 
     return df_train
+
+
+def fit_and_plot(model, train_data, test_data, epochs):
+    history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data))
+    plt.plot(history.history['loss'], label='train')
+    plt.plot(history.history['val_loss'], label='test')
+    plt.legend()
+    plt.show()
+    return model
