@@ -18,8 +18,8 @@ def build_model(input_shape=None, load_prev_model=False):
             return None
     else:
         model = tf.keras.Sequential()
-        model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
-        #model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=False))
+        # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
+        model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=False))
         model.add(tf.keras.layers.Dense(units=1))
         model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
@@ -30,7 +30,8 @@ from sklearn.preprocessing import StandardScaler
 
 
 class WindowGenerator:
-    def __init__(self, train_data, test_data, validation_data=None, target="y", n_input=12 * 24, n_output=1, shift=1,
+    def __init__(self, train_data, validation_data=None, test_data=None, target="y", n_input=12 * 24, n_output=1,
+                 shift=1,
                  num_predictions=12 * 2, batch_size=32):
 
         self.train_df = train_data
@@ -44,9 +45,7 @@ class WindowGenerator:
         self.num_predictions = num_predictions
         self.batch_size = batch_size
 
-        self.columns_indices = {col: i for i, col in enumerate(self.train_df.columns)}
-
-
+        self.columns_indices = {col: i for i, col in enumerate(self.train_df.columns)}  # valid if y is the last column
 
     def getInputShape(self):
         return self.n_input, self.n_features
@@ -55,7 +54,7 @@ class WindowGenerator:
         scaler = StandardScaler().fit(self.train_df.values)
 
         scaled_features = scaler.transform(data.values)
-        return scaled_features #pd.DataFrame(scaled_features, index=data.index, columns=data.columns)
+        return scaled_features  # pd.DataFrame(scaled_features, index=data.index, columns=data.columns)
 
     def make_dataset(self, data, batch_size=None):
         if batch_size is None:
@@ -115,7 +114,8 @@ class WindowGenerator:
 
     def split_window(self, dataObj):
 
-        samples = dataObj[:, slice(0, self.n_input), slice(0, self.columns_indices[self.target_col])]  # selects sequence length and the relevant features
+        samples = dataObj[:, slice(0, self.n_input),
+                  slice(0, self.columns_indices[self.target_col])]  # selects sequence length and the relevant features
         labels = dataObj[:, slice(self.n_input, None), :]  # from the end of the sequence, select the target
         labels = labels[:, :, self.columns_indices[self.target_col]]  # select only the y value
 
@@ -153,17 +153,55 @@ def add_time_features(df):
     return df
 
 
-def add_lag_features(df, lag):
-    df['prev_y_' + str(lag)] = df['y'].shift(lag)
+def add_lag_features(df, lags):
+    for lag in lags:
+        df['prev_y_' + str(lag)] = df['y'].shift(lag)
     df.dropna(inplace=True)
     return df
 
 
-def clean_data(df_train, df_test):
-    df_train_min = df_train.y.min()
-    df_train_max = df_train.y.max()
+from scipy import interpolate
 
-    return df_train
+
+def interpolate_data(dfs):
+    # Interpolate the data using the midpoints. based on the fact that the features are only updated every full hour
+    x = np.arange(0, len(dfs), 12)
+    y = dfs[::12]
+    f = interpolate.interp1d(x, y, kind='cubic')
+    xnew = np.arange(0, len(dfs) - 12)
+    interpolated = f(xnew)
+    return np.append(interpolated, dfs[-12:])
+
+
+def add_structural_imbalance(df):
+    # Starts the interpolation on half an hour before the first updated data point
+    start_index = df.query("start_time.dt.minute == 30").index[0] - 1
+
+    df = df[start_index:].copy(deep=True)
+
+    df["total_interpolated"] = interpolate_data(df.total).astype(np.float32)
+    df["flow_interpolated"] = interpolate_data(df.flow).astype(np.float32)
+
+    df["structural_imbalance"] = df["total_interpolated"] - df["total"]
+    df["structural_imbalance"] += df["flow_interpolated"] - df["flow"]
+    # df["structural_imbalance"][:300].plot(); plt.show()
+    return df
+
+
+def add_all_features(df, lags, struc_imbalance=False):
+    df = add_time_features(df)
+    df = add_lag_features(df, lags)
+    if struc_imbalance:
+        df = add_structural_imbalance(df)
+    return df
+
+
+def clean_data(dfs, upper_bound, lower_bound):
+    clamped_points = (dfs.y < lower_bound).sum() + (dfs.y > upper_bound).sum()
+    print("Points clamped: %d. In percent %.4f%%" % (clamped_points, (clamped_points / len(dfs.y)) * 100))
+
+    dfs.y = dfs.y.clip(lower_bound, upper_bound)
+    return dfs
 
 
 def fit_and_plot(model, train_data, test_data, epochs):
