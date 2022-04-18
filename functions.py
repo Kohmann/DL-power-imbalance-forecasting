@@ -63,7 +63,7 @@ class WindowGenerator:
         x_data = self.normalize(data)
         batchIterator = tf.keras.utils.timeseries_dataset_from_array(data=x_data, targets=None,
                                                                      sequence_length=self.n_input + self.shift,
-                                                                     batch_size=batch_size, shuffle=False)
+                                                                     batch_size=batch_size, shuffle=True)
 
         return batchIterator.map(self.split_window)  # splits into features and labels
 
@@ -153,10 +153,23 @@ def add_time_features(df):
     return df
 
 
-def add_lag_features(df, lags):
+def add_lag_features(df, lags, addNoise=False, addMeanprevDay=False):
+    mu, sigma = 0, 1  # mean and standard deviation
+    noise = np.random.normal(mu, sigma, len(df))
+
     for lag in lags:
-        df['prev_y_' + str(lag)] = df['y'].shift(lag)
+        df['prev_y_' + str(lag)] = df['y'].shift(lag) + (noise if addNoise else 0)
+
+    # add mean
+    if addMeanprevDay:
+        df = lagg_mean(df, steps=2 * 28) # previous day
+
     df.dropna(inplace=True)
+    return df
+
+
+def lagg_mean(df, steps=12 * 24):
+    df["mean_lag_" + str(steps)] = df.y.rolling(steps, center=False).mean()
     return df
 
 
