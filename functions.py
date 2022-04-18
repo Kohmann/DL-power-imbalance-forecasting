@@ -19,7 +19,7 @@ def build_model(input_shape=None, load_prev_model=False):
     else:
         model = tf.keras.Sequential()
         # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
-        model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=False))
+        model.add(tf.keras.layers.GRU(units=64*2, input_shape=input_shape, return_sequences=False))
         model.add(tf.keras.layers.Dense(units=1))
         model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
@@ -63,7 +63,7 @@ class WindowGenerator:
         x_data = self.normalize(data)
         batchIterator = tf.keras.utils.timeseries_dataset_from_array(data=x_data, targets=None,
                                                                      sequence_length=self.n_input + self.shift,
-                                                                     batch_size=batch_size, shuffle=True)
+                                                                     batch_size=batch_size, shuffle=False)
 
         return batchIterator.map(self.split_window)  # splits into features and labels
 
