@@ -21,6 +21,7 @@ def build_model(input_shape=None, load_prev_model=False):
         # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
         # model.add(tf.keras.layers.GRU(units=256, input_shape=input_shape, return_sequences=True, dropout=0.2))
         model.add(tf.keras.layers.GRU(units=128, input_shape=input_shape, return_sequences=False, dropout=0.2))
+
         model.add(tf.keras.layers.Dense(units=1))
         model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
