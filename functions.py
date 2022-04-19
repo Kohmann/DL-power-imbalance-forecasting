@@ -197,8 +197,9 @@ def add_structural_imbalance(df):
     df["total_interpolated"] = interpolate_data(df.total).astype(np.float32)
     df["flow_interpolated"] = interpolate_data(df.flow).astype(np.float32)
 
-    df["structural_imbalance"] = df["total_interpolated"] - df["total"]
-    df["structural_imbalance"] += df["flow_interpolated"] - df["flow"]
+    df["structural_imbalance"] = df["total"] - df["total_interpolated"]
+    df["y_new"] = df["y"] - df["structural_imbalance"]
+    #df["structural_imbalance"] += df["flow_interpolated"] - df["flow"]
     # df["structural_imbalance"][:300].plot(); plt.show()
     return df
 
