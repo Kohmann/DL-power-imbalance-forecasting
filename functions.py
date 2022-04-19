@@ -19,7 +19,8 @@ def build_model(input_shape=None, load_prev_model=False):
     else:
         model = tf.keras.Sequential()
         # model.add(tf.keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=False))
-        model.add(tf.keras.layers.GRU(units=64, input_shape=input_shape, return_sequences=False))
+        # model.add(tf.keras.layers.GRU(units=256, input_shape=input_shape, return_sequences=True, dropout=0.2))
+        model.add(tf.keras.layers.GRU(units=128, input_shape=input_shape, return_sequences=False, dropout=0.2))
         model.add(tf.keras.layers.Dense(units=1))
         model.compile(loss=tf.losses.MeanSquaredError(), optimizer='adam', metrics=[tf.metrics.MeanAbsoluteError()])
     return model
@@ -63,11 +64,11 @@ class WindowGenerator:
         x_data = self.normalize(data)
         batchIterator = tf.keras.utils.timeseries_dataset_from_array(data=x_data, targets=None,
                                                                      sequence_length=self.n_input + self.shift,
-                                                                     batch_size=batch_size, shuffle=True)
+                                                                     batch_size=batch_size, shuffle=False)
 
         return batchIterator.map(self.split_window)  # splits into features and labels
 
-    def predict_and_plot(self, model, data_raw, start_positions=None, save_plot=False):
+    def predict_and_plot(self, model, data_raw, start_positions=None, save_plot=None):
         if start_positions is None:
             start_positions = [0]
 
@@ -106,8 +107,8 @@ class WindowGenerator:
             plt.plot(x[len_history - 1:], predictions, label="predictions")
             # plt.plot(targets, label="targets")
             plt.legend()
-            if save_plot:
-                plt.savefig("prediction_plots/predictions_startpos=" + str(start_pos) + ".png")
+            if isinstance(save_plot, str):
+                plt.savefig("prediction_plots/ "+ save_plot +" _startpos=" + str(start_pos) + ".png")
                 plt.close()
             else:
                 plt.show()
