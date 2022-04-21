@@ -32,13 +32,13 @@ from sklearn.preprocessing import StandardScaler
 
 
 class WindowGenerator:
-    def __init__(self, train_data, validation_data=None, test_data=None, target="y", n_input=12 * 24, n_output=1,
+    def __init__(self, train_data, test_data=None, target="y", n_input=12 * 24, n_output=1,
                  shift=1,
                  num_predictions=12 * 2, batch_size=32):
 
         self.train_df = train_data
         self.test_df = test_data
-        self.validation_df = validation_data
+
         self.target_col = target  # string, column name in dataframe
         self.n_features = self.train_df.shape[1] - 1  # minus target
         self.n_input = n_input
@@ -89,6 +89,9 @@ class WindowGenerator:
 
             for sequence in tqdm(sequences[1:]):
                 # switch out the real y_prev with the predicted y
+                if "structural_imbalance" in self.columns_indices.keys():
+                    prediction = prediction - sequences[0][self.columns_indices["structural_imbalance"]]
+
                 sequence[-1, -1] = prediction
                 sequence = tf.expand_dims(sequence, axis=0)
                 prediction = model.predict(sequence)[0][0]
@@ -133,9 +136,21 @@ class WindowGenerator:
     def getTestData(self):
         return self.make_dataset(self.test_df, batch_size=self.num_predictions)
 
-    def getValidationData(self):
-        return self.make_dataset(self.validation_df, batch_size=self.num_predictions)
 
+def fit_and_plot(model, train_data, test_data, epochs):
+    history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data))
+
+    plt.plot(history.history['loss'], label='train')
+    if history.history['val_loss'][-1] / 10 > history.history['loss'][-1]:  # if the losses differ alot, make two plots
+        plt.legend()
+        plt.show()
+    plt.plot(history.history['val_loss'], label='test')
+    plt.legend()
+    plt.show()
+    return model
+
+
+## FEATURE ENGINEERING FUNCTIONS
 
 def add_time_features(df):
     # converts time, which is periodically, as a sine/cosine wave with equal periods
@@ -155,52 +170,47 @@ def add_time_features(df):
     return df
 
 
-def add_lag_features(df, lags, addNoise=False, addMeanprevDay=False):
+def add_lag_features(df, feature="y", lags=[1], addNoise=False, addMeanprevDay=False):
     mu, sigma = 0, 1  # mean and standard deviation
     noise = np.random.normal(mu, sigma, len(df))
 
     for lag in lags:
-        df['prev_y_' + str(lag)] = df['y'].shift(lag) + (noise if addNoise else 0)
+        df["prev_y_" + str(lag)] = df[feature].shift(lag) + (noise if addNoise else 0)
 
     # add mean
     if addMeanprevDay:
-        df = lagg_mean(df, steps=2 * 28) # previous day
+        steps = 12*24  # 24-hours behind
+        df["mean_lag_" + str(steps)] = df[feature].rolling(steps, center=False).mean()
 
     df.dropna(inplace=True)
     return df
 
 
-def lagg_mean(df, steps=12 * 24):
-    df["mean_lag_" + str(steps)] = df.y.rolling(steps, center=False).mean()
-    return df
-
 
 from scipy import interpolate
-
-
 def interpolate_data(dfs):
     # Interpolate the data using the midpoints. based on the fact that the features are only updated every full hour
     x = np.arange(0, len(dfs), 12)
     y = dfs[::12]
     f = interpolate.interp1d(x, y, kind='cubic')
-    xnew = np.arange(0, len(dfs) - 12)
+    xnew = np.arange(0, len(dfs)-12)
     interpolated = f(xnew)
     return np.append(interpolated, dfs[-12:])
 
 
-def add_structural_imbalance(df):
+def add_structural_imbalance(df, feature_name="y_struc_imb"):
     # Starts the interpolation on half an hour before the first updated data point
-    start_index = df.query("start_time.dt.minute == 30").index[0] - 1
+    start_index = df.query("start_time.dt.minute == 30").index[0]
 
     df = df[start_index:].copy(deep=True)
 
     df["total_interpolated"] = interpolate_data(df.total).astype(np.float32)
-    df["flow_interpolated"] = interpolate_data(df.flow).astype(np.float32)
+    df["flow_interpolated"] = interpolate_data(df.flow.values).astype(np.float32) # negates flow
 
     df["structural_imbalance"] = df["total"] - df["total_interpolated"]
-    df["y_new"] = df["y"] - df["structural_imbalance"]
-    #df["structural_imbalance"] += df["flow_interpolated"] - df["flow"]
-    # df["structural_imbalance"][:300].plot(); plt.show()
+    df["structural_imbalance"] += df["flow"] - df["flow_interpolated"]
+    df[feature_name] = df["y"] - df["structural_imbalance"]
+
     return df
 
 
@@ -220,14 +230,4 @@ def clean_data(dfs, upper_bound, lower_bound):
     return dfs
 
 
-def fit_and_plot(model, train_data, test_data, epochs):
-    history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data))
 
-    plt.plot(history.history['loss'], label='train')
-    if history.history['val_loss'][-1] / 10 > history.history['loss'][-1]:  # if the losses differ alot, make two plots
-        plt.legend()
-        plt.show()
-    plt.plot(history.history['val_loss'], label='test')
-    plt.legend()
-    plt.show()
-    return model
