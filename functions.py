@@ -138,7 +138,13 @@ class WindowGenerator:
 
 
 def fit_and_plot(model, train_data, test_data, epochs):
-    history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data))
+    cp_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath="model_weights/checkpoints/cp-{epoch:04d}.ckpt",
+        verbose=1,
+        save_weights_only=True,
+        save_freq='epoch')
+
+    history = model.fit(train_data, epochs=epochs, verbose=1, validation_data=(test_data), callbacks=[cp_callback])
 
     plt.plot(history.history['loss'], label='train')
     if history.history['val_loss'][-1] / 10 > history.history['loss'][-1]:  # if the losses differ alot, make two plots
