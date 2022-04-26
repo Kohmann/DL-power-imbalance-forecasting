@@ -177,7 +177,7 @@ def add_time_features(df):
 
 
 def add_lag_features(df, feature="y", lags=[1], addNoise=False, addMeanprevDay=False):
-    mu, sigma = 0, 1  # mean and standard deviation
+    mu, sigma = 0, 10  # mean and standard deviation
     noise = np.random.normal(mu, sigma, len(df))
 
     for lag in lags:
